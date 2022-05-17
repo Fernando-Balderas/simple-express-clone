@@ -1,25 +1,34 @@
-// Your code here
+'use strict'
+
 import HttpServer from './server'
 
 const server = new HttpServer(3000)
 
-server.get('/', (req, res) => {
-  res.status(200).send('Home page')
-})
+// server.use((req: ServerRequest, res: ServerResponse, next: NextHandler) => {
+//   res.end('Hello, world!')
+//   next()
+// })
 
-server.post('/api/posts', (req, res) => {
-  const post = req.payload
-  res.status(200).send(post)
-})
+// server.get('/', (req: ServerRequest, res: ServerResponse) => {
+//   res.status(200).send('Home page')
+// })
 
-server.delete('/api/posts/:postId', (req, res) => {
-  const postId = req.params.postId
-  res.status(200).send(`Deleted ${postId}`)
-})
+// server.post('/api/posts', (req: ServerRequest, res: ServerResponse) => {
+//   const post = req.payload
+//   res.status(200).send(post)
+// })
 
-server.put('/api/posts/:postId', (req, res) => {
-  const postId = req.params.postId
-  res.status(200).send(`Updated ${postId}`)
-})
+// server.delete(
+//   '/api/posts/:postId',
+//   (req: ServerRequest, res: ServerResponse) => {
+//     const postId = req.params.postId
+//     res.status(200).send(`Deleted ${postId}`)
+//   }
+// )
+
+// server.put('/api/posts/:postId', (req: ServerRequest, res: ServerResponse) => {
+//   const postId = req.params.postId
+//   res.status(200).send(`Updated ${postId}`)
+// })
 
 server.listen()
