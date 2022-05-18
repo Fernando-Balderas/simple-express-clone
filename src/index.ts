@@ -8,10 +8,10 @@ server.get('/', (_: Request, res: Response) => {
   res.status(200).send('Get works!')
 })
 
-// server.post('/api/posts', (req: Request, res: Response) => {
-//   const post = req.payload
-//   res.status(200).send(post)
-// })
+server.post('/api/posts', (req: Request, res: Response) => {
+  const post = req.payload
+  res.status(200).send(post)
+})
 
 server.delete('/api/posts/:postId', (req: Request, res: Response) => {
   const postId = req.params.postId

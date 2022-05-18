@@ -1,18 +1,30 @@
 import http, { IncomingMessage, ServerResponse, Server } from 'http'
 import { match, MatchFunction, MatchResult } from 'path-to-regexp'
 
+export interface Request extends IncomingMessage {
+  params: Params
+  payload: ResponseBody
+  [_: string]: any
+}
+
+export interface Response extends ServerResponse {
+  status: (statusCode: number) => Response
+  send: (body: ResponseBody) => void
+}
+
 export type ErrorHandler = (err?: unknown) => void
 export type NextHandler = (err?: unknown) => void
 
 export type ServerRequestHandler = (
   req: Request,
   res: Response,
+  current: Middleware,
   next: NextHandler
 ) => void
 
 type Middleware = {
   path: string
-  pathFn: MatchFunction
+  matchPathFn: MatchFunction
   method: string
   handlers: ServerRequestHandler[]
 }
@@ -21,17 +33,7 @@ type Params = {
   [key: string]: string | number
 }
 
-export type Request = {
-  params: Params
-} & IncomingMessage
-
 type ResponseBody = string | Buffer | object
-
-export type Response = {
-  status: (statusCode: number) => Response
-  send: (body: ResponseBody) => void
-  statusCode: number
-} & ServerResponse
 
 export default class HttpServer {
   private _server: Server
@@ -45,70 +47,79 @@ export default class HttpServer {
   get(path: string, handler: ServerRequestHandler) {
     this._middlewares.push({
       path,
-      pathFn: match(path),
+      matchPathFn: match(path),
       method: 'GET',
-      handlers: [this.responseHandler, handler],
+      handlers: [
+        this.enhanceParamsHandler,
+        this.enhanceResponseHandler,
+        handler,
+      ],
     })
   }
 
-  // post(path: string, handler: ServerRequestHandler) {
-  //   this._middlewares.push({
-  //     path,
-  //     method: 'POST',
-  //     handlers: [this.responseHandler, handler],
-  //   })
-  // }
+  post(path: string, handler: ServerRequestHandler) {
+    this._middlewares.push({
+      path,
+      matchPathFn: match(path),
+      method: 'POST',
+      handlers: [
+        this.enhanceParamsHandler,
+        this.payloadHandler,
+        this.enhanceResponseHandler,
+        handler,
+      ],
+    })
+  }
 
   delete(path: string, handler: ServerRequestHandler) {
     this._middlewares.push({
       path,
-      pathFn: match(path),
+      matchPathFn: match(path),
       method: 'DELETE',
-      handlers: [this.responseHandler, handler],
+      handlers: [
+        this.enhanceParamsHandler,
+        this.enhanceResponseHandler,
+        handler,
+      ],
     })
   }
 
   put(path: string, handler: ServerRequestHandler) {
     this._middlewares.push({
       path,
-      pathFn: match(path),
+      matchPathFn: match(path),
       method: 'PUT',
-      handlers: [this.responseHandler, handler],
+      handlers: [
+        this.enhanceParamsHandler,
+        this.payloadHandler,
+        this.enhanceResponseHandler,
+        handler,
+      ],
     })
   }
 
   handle = (req: IncomingMessage, res: ServerResponse) => {
     let i = 0
-    let reqPath = ''
-    const method: string = req.method ? req.method : ''
-    if (req.url && req.headers) {
-      const url = new URL(req.url, `http://${req.headers.host}`)
-      reqPath = url.pathname
-    }
+    const reqUrl: string = req.url ? req.url : ''
+    const reqMethod: string = req.method ? req.method : ''
     const found = this._middlewares.find(
-      (route) => route.pathFn(reqPath) && route.method === method
+      (route) => route.matchPathFn(reqUrl) && route.method === reqMethod
     )
-    // Overload req with params from uri
-    let params = {}
-    if (found != undefined) {
-      const matched = found.pathFn(reqPath) as MatchResult
-      params = matched.params
-    }
-    req = { ...req, params: { ...params } } as Request
     const errorHandler: ErrorHandler = (err) => {
-      if (err == null) {
-        res.writeHead(500, { 'Content-Type': 'text/plain' })
-        res.end('Internal Server Error')
-      }
+      console.error('into errorHandler ', err)
+      res.writeHead(500, { 'Content-Type': 'text/plain' })
+      res.end('Internal Server Error')
     }
     const next: NextHandler = (err) => {
       if (err != null) return setImmediate(() => errorHandler(err))
-      if (found === undefined) return setImmediate(() => errorHandler())
-      if (i >= found.handlers.length) return setImmediate(() => errorHandler())
+      if (found === undefined)
+        return setImmediate(() => errorHandler('MIDDLEWARE NOT FOUND'))
+      if (i >= found.handlers.length)
+        return setImmediate(() => errorHandler('INDEX LIMIT EXCEEDED'))
       const layer = found.handlers[i++]
       setImmediate(() => {
         try {
-          layer(req as Request, res as Response, next)
+          layer(req as Request, res as Response, found, next)
         } catch (error) {
           next(error)
         }
@@ -117,12 +128,17 @@ export default class HttpServer {
     next()
   }
 
-  responseHandler = (_: Request, res: Response, next: NextHandler) => {
+  enhanceResponseHandler = (
+    _: Request,
+    res: Response,
+    current: Middleware,
+    next: NextHandler
+  ) => {
     res.status = (statusCode) => {
       res.statusCode = statusCode
       return res
     }
-    res.send = (body) => {
+    res.send = (body = '') => {
       if (typeof body === 'string') {
         res.setHeader('Content-Type', 'text/plain')
       } else if (body instanceof Buffer) {
@@ -136,6 +152,42 @@ export default class HttpServer {
       res.end(body, 'utf8')
     }
     next()
+  }
+
+  enhanceParamsHandler = (
+    req: Request,
+    _: Response,
+    current: Middleware,
+    next: NextHandler
+  ) => {
+    const reqUrl: string = req.url ? req.url : ''
+    const matched = current.matchPathFn(reqUrl) as MatchResult
+    if (matched) req.params = { ...matched.params }
+    else req.params = {}
+    next()
+  }
+
+  payloadHandler = (
+    req: Request,
+    _: Response,
+    current: Middleware,
+    next: NextHandler
+  ) => {
+    if (req.method === 'POST') {
+      let data = ''
+      req.on('data', (chunk) => {
+        data += chunk
+        if (data.length > 1e6) req.connection.destroy()
+      })
+      req.on('end', () => {
+        req.payload = JSON.parse(data)
+        next()
+      })
+      req.on('error', () => {
+        req.payload = {}
+        next()
+      })
+    } else next()
   }
 
   listen(): void {
