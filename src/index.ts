@@ -1,6 +1,7 @@
 'use strict'
 
-import HttpServer, { Request, Response } from './server'
+import HttpServer from './server'
+import { Request, Response } from './types'
 
 const server = new HttpServer(3000)
 

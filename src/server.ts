@@ -1,39 +1,13 @@
 import http, { IncomingMessage, ServerResponse, Server } from 'http'
-import { match, MatchFunction, MatchResult } from 'path-to-regexp'
-
-export interface Request extends IncomingMessage {
-  params: Params
-  payload: ResponseBody
-  [_: string]: any
-}
-
-export interface Response extends ServerResponse {
-  status: (statusCode: number) => Response
-  send: (body: ResponseBody) => void
-}
-
-export type ErrorHandler = (err?: unknown) => void
-export type NextHandler = (err?: unknown) => void
-
-export type ServerRequestHandler = (
-  req: Request,
-  res: Response,
-  current: Middleware,
-  next: NextHandler
-) => void
-
-type Middleware = {
-  path: string
-  matchPathFn: MatchFunction
-  method: string
-  handlers: ServerRequestHandler[]
-}
-
-type Params = {
-  [key: string]: string | number
-}
-
-type ResponseBody = string | Buffer | object
+import { match, MatchResult } from 'path-to-regexp'
+import {
+  ErrorHandlerFn,
+  Middleware,
+  NextHandlerFn,
+  Request,
+  Response,
+  ServerRequestHandler,
+} from './types'
 
 export default class HttpServer {
   private _server: Server
@@ -105,12 +79,12 @@ export default class HttpServer {
     const found = this._middlewares.find(
       (route) => route.matchPathFn(reqUrl) && route.method === reqMethod
     )
-    const errorHandler: ErrorHandler = (err) => {
+    const errorHandler: ErrorHandlerFn = (err) => {
       console.error('into errorHandler ', err)
       res.writeHead(500, { 'Content-Type': 'text/plain' })
       res.end('Internal Server Error')
     }
-    const next: NextHandler = (err) => {
+    const next: NextHandlerFn = (err) => {
       if (err != null) return setImmediate(() => errorHandler(err))
       if (found === undefined)
         return setImmediate(() => errorHandler('MIDDLEWARE NOT FOUND'))
@@ -132,7 +106,7 @@ export default class HttpServer {
     _: Request,
     res: Response,
     current: Middleware,
-    next: NextHandler
+    next: NextHandlerFn
   ) => {
     res.status = (statusCode) => {
       res.statusCode = statusCode
@@ -158,7 +132,7 @@ export default class HttpServer {
     req: Request,
     _: Response,
     current: Middleware,
-    next: NextHandler
+    next: NextHandlerFn
   ) => {
     const reqUrl: string = req.url ? req.url : ''
     const matched = current.matchPathFn(reqUrl) as MatchResult
@@ -171,7 +145,7 @@ export default class HttpServer {
     req: Request,
     _: Response,
     current: Middleware,
-    next: NextHandler
+    next: NextHandlerFn
   ) => {
     if (req.method === 'POST') {
       let data = ''
