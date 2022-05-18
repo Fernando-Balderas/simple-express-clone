@@ -68,13 +68,14 @@ export default class HttpServer {
     })
   }
 
-  // put(path: string, handler: ServerRequestHandler) {
-  //   this._middlewares.push({
-  //     path,
-  //     method: 'PUT',
-  //     handlers: [this.responseHandler, handler],
-  //   })
-  // }
+  put(path: string, handler: ServerRequestHandler) {
+    this._middlewares.push({
+      path,
+      pathFn: match(path),
+      method: 'PUT',
+      handlers: [this.responseHandler, handler],
+    })
+  }
 
   handle = (req: IncomingMessage, res: ServerResponse) => {
     let i = 0
@@ -87,7 +88,7 @@ export default class HttpServer {
     const found = this._middlewares.find(
       (route) => route.pathFn(reqPath) && route.method === method
     )
-    // Overload req with params
+    // Overload req with params from uri
     let params = {}
     if (found != undefined) {
       const matched = found.pathFn(reqPath) as MatchResult
