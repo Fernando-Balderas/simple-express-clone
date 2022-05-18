@@ -1,18 +1,29 @@
 import http, { IncomingMessage, ServerResponse, Server } from 'http'
+import { match, MatchFunction, MatchResult } from 'path-to-regexp'
 
+export type ErrorHandler = (err?: unknown) => void
 export type NextHandler = (err?: unknown) => void
 
 export type ServerRequestHandler = (
-  req: IncomingMessage,
+  req: Request,
   res: Response,
   next: NextHandler
 ) => void
 
-type Route = {
+type Middleware = {
   path: string
+  pathFn: MatchFunction
   method: string
-  stack: any[]
+  handlers: ServerRequestHandler[]
 }
+
+type Params = {
+  [key: string]: string | number
+}
+
+export type Request = {
+  params: Params
+} & IncomingMessage
 
 type ResponseBody = string | Buffer | object
 
@@ -24,79 +35,79 @@ export type Response = {
 
 export default class HttpServer {
   private _server: Server
-  private _routes: Route[]
-  // private _stack: any[]
+  private _middlewares: Middleware[]
 
   constructor(private readonly _port: number = 3000) {
-    this._server = http.createServer(this.handler)
-    this._routes = []
-    // this._stack = []
+    this._server = http.createServer(this.handle)
+    this._middlewares = []
   }
 
   get(path: string, handler: ServerRequestHandler) {
-    this._routes.push({
+    this._middlewares.push({
       path,
+      pathFn: match(path),
       method: 'GET',
-      stack: [this.responseHandler, handler],
+      handlers: [this.responseHandler, handler],
     })
   }
 
   // post(path: string, handler: ServerRequestHandler) {
-  //   this._routes.push({
+  //   this._middlewares.push({
   //     path,
   //     method: 'POST',
-  //     stack: [this.responseHandler, handler],
+  //     handlers: [this.responseHandler, handler],
   //   })
   // }
 
-  // delete(path: string, handler: ServerRequestHandler) {
-  //   this._routes.push({
-  //     path,
-  //     method: 'DELETE',
-  //     stack: [this.responseHandler, handler],
-  //   })
-  // }
+  delete(path: string, handler: ServerRequestHandler) {
+    this._middlewares.push({
+      path,
+      pathFn: match(path),
+      method: 'DELETE',
+      handlers: [this.responseHandler, handler],
+    })
+  }
 
   // put(path: string, handler: ServerRequestHandler) {
-  //   this._routes.push({
+  //   this._middlewares.push({
   //     path,
   //     method: 'PUT',
-  //     stack: [this.responseHandler, handler],
+  //     handlers: [this.responseHandler, handler],
   //   })
   // }
 
-  // use(middleware: any) {
-  //   if (typeof middleware !== 'function') {
-  //     throw new Error('Middleware must be a function!')
-  //   }
-  //   this._stack.push(middleware)
-  // }
-
-  handler = (req: IncomingMessage, res: ServerResponse) => {
+  handle = (req: IncomingMessage, res: ServerResponse) => {
     let i = 0
-    let path = ''
+    let reqPath = ''
     const method: string = req.method ? req.method : ''
     if (req.url && req.headers) {
       const url = new URL(req.url, `http://${req.headers.host}`)
-      path = url.pathname
+      reqPath = url.pathname
     }
-    const errorHandler = (err?: any) => {
+    const found = this._middlewares.find(
+      (route) => route.pathFn(reqPath) && route.method === method
+    )
+    // Overload req with params
+    let params = {}
+    if (found != undefined) {
+      const matched = found.pathFn(reqPath) as MatchResult
+      params = matched.params
+    }
+    req = { ...req, params: { ...params } } as Request
+    const errorHandler: ErrorHandler = (err) => {
       if (err == null) {
         res.writeHead(500, { 'Content-Type': 'text/plain' })
         res.end('Internal Server Error')
       }
     }
-    const next = (err?: any) => {
+    const next: NextHandler = (err) => {
       if (err != null) return setImmediate(() => errorHandler(err))
-      const found = this._routes.find(
-        (route) => route.path === path && route.method === method
-      )
       if (found === undefined) return setImmediate(() => errorHandler())
-      if (i >= found.stack.length) return setImmediate(() => errorHandler())
-      const layer = found.stack[i++]
+      if (i >= found.handlers.length) return setImmediate(() => errorHandler())
+      const layer = found.handlers[i++]
       setImmediate(() => {
         try {
-          layer(req, res, next)
+          layer(req as Request, res as Response, next)
         } catch (error) {
           next(error)
         }
@@ -105,7 +116,7 @@ export default class HttpServer {
     next()
   }
 
-  responseHandler = (_: IncomingMessage, res: Response, next: NextHandler) => {
+  responseHandler = (_: Request, res: Response, next: NextHandler) => {
     res.status = (statusCode) => {
       res.statusCode = statusCode
       return res
